@@ -1,0 +1,7 @@
+build/
+*.list
+*.pdf
+*.out
+*.log
+*.aux
+exercises/

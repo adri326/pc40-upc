@@ -1,0 +1,127 @@
+\documentclass[12pt]{article}
+
+\setlength{\parskip}{1em}
+
+\usepackage[T1]{fontenc}
+\usepackage[a4paper, margin=1in]{geometry}
+\usepackage{amsfonts}
+\usepackage{amsmath}
+\usepackage{listings}
+\usepackage{xcolor}
+
+
+
+\usepackage{hyperref}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue,
+  urlcolor=blue,
+  pdftitle={PC40 Hands-on: UPC}
+}
+
+% \definecolor{gray}{rgb}{0.5,0.5,0.5}
+% \definecolor{purple}{rgb}{0.58,0,0.82}
+\definecolor{bgColor}{rgb}{0.95,0.95,0.92}
+\lstdefinestyle{C}{
+    backgroundcolor=\color{bgColor},
+    commentstyle=\color{gray},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{gray},
+    stringstyle=\color{purple},
+    basicstyle=\footnotesize,
+    breakatwhitespace=false,
+    breaklines=true,
+    captionpos=b,
+    keepspaces=true,
+    numbers=left,
+    numbersep=5pt,
+    showspaces=false,
+    showstringspaces=false,
+    showtabs=false,
+    tabsize=2,
+    language=C
+}
+
+\newcommand{\us}[0]{${\mu}s$}
+
+\title{PC40 Hands-on: UPC}
+\author{Adrien Burgun}
+\date{Automne 2021}
+% \graphicspath{{report/}}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+  For this hands-on assignement, I wanted to measure the performance of the different versions of the code and compare them to measure speedups.
+  For this reason, my code diverges slightly from the template that was given to us, as I needed to insert a timing method and avoid refactoring the code.
+
+  You will find in this report listings of the different versions of the code, alongside experimental measurements and commentaries.
+\end{abstract}
+
+\section{Simplified 1D Laplace solver}
+
+\subsection{C implementation}
+
+The C implementation of the laplace solver has been slightly modified to time the main loop.
+It is single-threaded but the implementation allows for compiler SIMD optimizations.
+Settings common to every version (vector size, epsilon, max number of iterations) have been placed in a file called \texttt{settings.h}.
+
+This code has been compiled with \texttt{gcc v4.9.0} and run on the \texttt{mesoshared} server, yielding the following results:
+
+\begin{table}[h]
+  \centering\begin{tabular}{|c|c|c|}
+    \hline
+    Options & Time (avg) & Time (stdev) \\
+    \hline
+    \texttt{-O0} & 450\us/iter & $\pm$ 10\us/iter \\
+    \texttt{-O3} & 140\us/iter & $\pm$ 10\us/iter \\
+    \hline
+  \end{tabular}
+  \caption{Timing results for the C implementation of the 1D Laplace solver (Listing~\ref{lst:laplace2})}
+  \label{tab:laplace2}
+\end{table}
+
+\lstinputlisting[style=C, label={lst:laplace2}, caption={
+  C implementation of the 1D Laplace solver
+}]{laplace/ex2.c}
+
+\subsection{Porting the C code to UPC}
+
+The base C implementation was designed to be able to quickly port it to UPC.
+A new \texttt{if} statement had to be inserted in the \texttt{for} loop within \texttt{iteration()}.
+Additionally, several lines had to only be executed by the thread 0, so additional conditionals were added when needed.
+Finally, the \texttt{x}, \texttt{xnew} and \texttt{b} arrays were made shared and \texttt{upc\_barrier} statements were added at the end of \texttt{init}, \texttt{iteration} and \texttt{copy\_array}.
+
+This code was compiled with \texttt{upcc v2.22.0 + gcc v4.2.4} and run on the \texttt{mesoshared} server, yielding the following results:
+
+\begin{table}[h]
+  \centering\begin{tabular}{|c|c|c|}
+    \hline
+    Threads & Time (avg) & Time (stdev) \\
+    \hline
+    2 & 515.2\us/iter & $\pm$ 3.9\us/iter \\
+    3 & 536.2\us/iter & $\pm$ 2.4\us/iter \\
+    4 & 312.4\us/iter & $\pm$ 2.0\us/iter \\
+    8 & 204.0\us/iter & $\pm$ 2.0\us/iter \\
+    16 & 166.2\us/iter & $\pm$ 2.5\us/iter \\
+    32 & 150.4\us/iter & $\pm$ 3.2\us/iter \\
+    \hline
+  \end{tabular}
+  \caption{Timing results for the first UPC implementation of the 1D Laplace solver (Listing~\ref{lst:laplace3})}
+  \label{tab:laplace3}
+\end{table}
+
+When compiled and run with 3 threads, the code runs noticeably slower. For curiosity, I ran the code with 24 and 31 threads and obtained a similar slowdown:
+
+\begin{center}
+  Threads = 24, \quad Time = 252.6\us/iter $\pm$ 3.7\us/iter \enspace (expected $\approx 160$ \us/iter) \\
+  Threads = 31, \quad Time = 317.6\us/iter $\pm$ 4.4\us/iter \enspace (expected $\approx 150$ \us/iter)
+\end{center}
+
+\lstinputlisting[style=C, label={lst:laplace3}, caption={
+  First UPC implementation of the 1D Laplace solver
+}]{laplace/ex3.upc}
+
+% \lstinputlisting[style=C]{2d_heat/heat_c.c}
+\end{document}
