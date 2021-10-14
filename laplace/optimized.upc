@@ -24,6 +24,7 @@ int main() {
 
     size_t iter = 0;
 
+    clock_t begin = clock();
     while (true) {
         diff[MYTHREAD] = 0;
 
@@ -38,11 +39,10 @@ int main() {
 
         copy_array();
     }
-
-    // upc_lock_free(diffmax_lock);
-
+    clock_t end = clock();
 
     if (MYTHREAD == 0) {
+        double diff = (double)(end - begin) / CLOCKS_PER_SEC / ITERATIONS;
         double mean_squared = 0.0;
         if (DISPLAY) {
             printf("| b      | x      | x_new  |\n");
@@ -54,6 +54,7 @@ int main() {
         for (size_t i = 0; i < LEN; i++) mean_squared += (x_new[i] - x[i]) * (x_new[i] - x[i]);
         printf("\nIterations: %d\n", ITERATIONS);
         printf("Mean squared difference: %1.4lf\n", mean_squared / LEN);
+        printf("Took %.3lfms/iter!\n", diff * 1000);
     }
 }
 
@@ -84,28 +85,43 @@ void handle_diff(double d) {
 }
 
 void iteration() {
-    upc_forall (size_t i = 1; i < LEN - 1; i++; &x_new[i]) {
-        x_new[i] = 0.5 * (x[i-1] + x[i+1] + b[i]);
-        handle_diff(x_new[i] - x[i]);
+    size_t i = MYTHREAD * BLOCKSIZE;
+    if (i == 0) {
+        i += THREADS * BLOCKSIZE;
     }
 
-    // Border values are left null
-    // if (MYTHREAD == 0) {
-    //     x_new[0] = x[0];
-    //     handle_diff(x_new[0] - x[0]);
-    // }
-    // if (MYTHREAD == THREADS - 1) {
-    //     x_new[LEN - 1] = x[LEN - 1];
-    //     handle_diff(x_new[LEN - 1] - x[LEN - 1]);
-    // }
+    for (; i < LEN - 1; i += THREADS * BLOCKSIZE) {
+        for (size_t j = 0; j < BLOCKSIZE; j++) {
+            size_t k = i + j;
+            x_new[k] = 0.5 * (x[k-1] + x[k+1] + b[k]);
+            handle_diff(x_new[k] - x[k]);
+        }
+    }
 
-    // upc_barrier;
+    // upc_forall happens to be much slower!
+    // upc_forall (size_t i = 1; i < LEN - 1; i++; &x_new[i]) {
+    //     x_new[i] = 0.5 * (x[i-1] + x[i+1] + b[i]);
+    //     handle_diff(x_new[i] - x[i]);
+    // }
 }
 
 void copy_array() {
-    upc_forall (size_t i = 0; i < LEN; i++; &x_new[i]) {
-        x[i] = x_new[i];
+    size_t i = MYTHREAD * BLOCKSIZE;
+    if (i == 0) {
+        i += THREADS * BLOCKSIZE;
     }
+
+    for (; i < LEN - 1; i += THREADS * BLOCKSIZE) {
+        for (size_t j = 0; j < BLOCKSIZE; j++) {
+            size_t k = i + j;
+            x[k] = x_new[k];
+        }
+    }
+
+    // upc_forall happens to be much slower!
+    // upc_forall (size_t i = 0; i < LEN; i++; &x_new[i]) {
+    //     x[i] = x_new[i];
+    // }
 
     upc_barrier;
 }

@@ -5,7 +5,7 @@
 \usepackage[T1]{fontenc}
 \usepackage[a4paper, margin=0.7in]{geometry}
 \usepackage{amsfonts}
-\usepackage{amsmath}
+\usepackage{mathabx}
 \usepackage{listings}
 \usepackage{xcolor}
 \usepackage{subcaption}
@@ -231,6 +231,13 @@ Whichever value is chosen, however, the program did not run faster than \texttt{
 When ran with $B = 1$, $THREADS = 32$, the code takes 318\us/iter $\pm$ 7.8\us/iter.
 I do not know what causes this slowdown, but it seems like \texttt{upc\_forall} could contribute to it.
 
+When limiting the modification of \texttt{ex4.upc} to only replace the \texttt{for} loop with a \texttt{upc\_forall} loop, the example becomes $83\%$ slower (206\us/iter $\rightarrow$ 376\us/iter, 8 threads, AMD Ryzen 2700X, \texttt{upcc v2.28.2 + gcc v9.3.0}).
+
+\subsubsection{Note on the update/copy loop}
+
+So far, the program has been running many iterations of the "main" loop, which calls \texttt{iteration()} and \texttt{copy\_array()}.
+A \texttt{upc\_barrier;} call is necessary at the end of each of those two operations, as \texttt{copy\_array()} modifies $x$ and depends on the processed value of $x_{new}$, while \texttt{iteration()} modifies $x_{new}$ and depends on the copied value in $x$.
+
 \begin{figure}[ht]
   \begin{subfigure}[b]{0.49\columnwidth}
     \begin{lstlisting}[style=C, numbers=none]
@@ -258,38 +265,7 @@ shared[BLOCKSIZE] double b[LEN];
   \label{fig:laplace45a}
 \end{figure}
 
-\begin{figure}[ht]
-  \begin{subfigure}[b]{0.49\columnwidth}
-    \begin{lstlisting}[style=C, numbers=none]
-// ex4.upc:
-void iteration() {
-    size_t i = MYTHREAD;
-    if (MYTHREAD == 0) {
-        i += THREADS;
-        x_new[0] = x[0];
-    }
-
-    for (; i < LEN - 1; i += THREADS) {
-        x_new[i] = 0.5 * (x[i-1] + x[i+1] + b[i]);
-    }
-
-    if (MYTHREAD == THREADS - 1) x_new[LEN - 1] = x[LEN - 1];
-
-    upc_barrier;
-}
-
-void copy_array() {
-    for (size_t i = MYTHREAD; i < LEN; i += THREADS) {
-        x[i] = x_new[i];
-    }
-    upc_barrier;
-}
-    \end{lstlisting}
-    \caption{Previous \texttt{iteration()} and \texttt{copy\_array()} implementations}
-  \end{subfigure}
-  \hfill
-  \begin{subfigure}[b]{0.49\columnwidth}
-    \begin{lstlisting}[style=C, numbers=none]
+\begin{lstlisting}[style=C, numbers=none, caption={New \texttt{iteration()} and \texttt{copy\_array()} implementations}, label={fig:laplace45b}]
 // ex5.upc:
 void iteration() {
     upc_forall (size_t i = 1; i < LEN - 1; i++; &x_new[i]) {
@@ -308,17 +284,117 @@ void copy_array() {
     }
     upc_barrier;
 }
-    \end{lstlisting}
-    \caption{New \texttt{iteration()} and \texttt{copy\_array()} implementations}
-  \end{subfigure}
-  \caption{Modification of the \texttt{iteration()} and \texttt{copy\_array()} functions to use \texttt{upc\_forall} to take into account the new blocking factor}
-  \label{fig:laplace45b}
-\end{figure}
+\end{lstlisting}
 
-\subsubsection{Note on the update/copy loop}
+\newpage
 
-So far, the program has been running many iterations of the "main" loop, which calls \texttt{iteration()} and \texttt{copy\_array()}.
-A \texttt{upc\_barrier;} call is necessary at the end of each of those two operations, as \texttt{copy\_array()} modifies $x$ and depends on the processed value of $x_{new}$, while \texttt{iteration()} modifies $x_{new}$ and depends on the copied value in $x$.
+\subsection{Detecting convergence}
+
+One of our last modifications is to measure $\delta_{max} = \max_{i\in \ldbrack 0; n-1 \rdbrack}{\bigl\vert x[i]-x_{new}[i] \bigr\vert}$ (named \texttt{diffmax} in the source code) and to stop once $\delta_{max} \leq \varepsilon$.
+
+Because of the shared nature of $x$ and $x_{new}$, we need to compute a partial $\delta_{max}^t$ and compute $\delta_{max} = \max_{t \in [0; T[}(\delta_{max}^t)$, with:
+
+$$\delta_{max}^t = \max_{i\in \ldbrack 0; n-1 \rdbrack, \; \textrm{\tiny affinity}(x_{new}[i]) = t}{\Bigl\vert x[i]-x_{new}[i] \Bigr\vert}$$
+
+The new timings are:
+
+\begin{table}[ht]
+  \centering\begin{tabular}{|c|c|c|}
+    \hline
+    Threads & Time (avg) & CI ($\sigma=0.01$) \\
+    \hline
+    2 & 1400.4\us/iter & $\pm$ 6.0\us/iter \\
+    4 & 1092.8\us/iter & $\pm$ 17.0\us/iter \\
+    8 & 803.4\us/iter & $\pm$ 7.7\us/iter \\
+    16 & 647.8\us/iter & $\pm$ 18.9\us/iter \\
+    32 & 572.0\us/iter & $\pm$ 4.6\us/iter \\
+    \hline
+  \end{tabular}
+  \caption{Timing results for the fourth UPC implementation of the 1D Laplace solver, $B = 32$, \texttt{MAX\_ITER = 1000}}
+  \label{tab:laplace6}
+\end{table}
+
+\begin{lstlisting}[style=C, caption={Excerpt from ex6.upc: new \texttt{handle\_diff} function and calculation of \texttt{diffmax}}, label={lst:laplace6}]
+// ex6.upc (partial):
+shared double diff[THREADS];
+shared double diffmax;
+
+void handle_diff(double d) {
+    if (d < 0.0) d = -d;
+    if (diff[MYTHREAD] < d) diff[MYTHREAD] = d;
+}
+
+int main() {
+    // ...
+    while (true) {
+        iteration();
+
+        upc_barrier;
+
+        if (MYTHREAD == 0) {
+            for (size_t n = 0; n < THREADS; n++) {
+                if (diffmax < diff[n]) diffmax = diff[n];
+            }
+        }
+
+        upc_barrier;
+
+        if (diffmax <= EPSILON) break;
+        if (++iter > MAX_ITER) break;
+
+        copy_array(); // upc_barrier; at the end of copy_array();
+    }
+    // ...
+}
+
+void iteration() {
+    upc_forall (size_t i = 1; i < LEN - 1; i++; &x_new[i]) {
+        x_new[i] = 0.5 * (x[i-1] + x[i+1] + b[i]);
+        handle_diff(x_new[i] - x[i]);
+    }
+}
+\end{lstlisting}
+
+\subsubsection{Using reduction operations}
+
+We can further optimize this code by using reduction operations from \texttt{upc\_collective.h}.
+The optimized variant is available at \texttt{\href{https://github.com/adri326/pc40-upc/tree/main/laplace/ex5.upc}{laplace/optimized.upc}}.
+
+By removing the calls to \texttt{upc\_forall}, we can reduce the time taken by a further $35\% (\pm 5\%pt)$.
+
+% Unfortunately, no real performance benefit was observed, even with 32 threads.
+
+
+% TODO: redo the measurements
+\begin{table}[ht]
+  \centering\begin{tabular}{|c|c|c|c|}
+    \hline
+    Threads & Time (avg) & CI ($\sigma=0.01$) \\
+    \hline
+    2 & 1401.2\us/iter & $\pm$ 5.3\us/iter \\
+    4 & 1106\us/iter & $\pm$ 15.5\us/iter \\
+    8 & 816.8\us/iter & $\pm$ 6.3\us/iter \\
+    16 & 654.6\us/iter & $\pm$ 5.0\us/iter \\
+    32 & 586.2\us/iter & $\pm$ 5.1\us/iter \\
+    \hline
+  \end{tabular}
+  \caption{Timing results for the fully optimized UPC implementation of the 1D Laplace solver, $B = 32$, \texttt{MAX\_ITER = 1000}}
+  \label{tab:laplace6opt}
+\end{table}
+
+\subsection{Conclusion (1D Laplace Solver)}
+
+The first implementation in UPC of the 1D Laplace solver algorithm and its subsequent first optimization (flattening the \texttt{for (...) if (...)}) gave very promising results for the improvement of the speed of the program, bringing the timings down from 140\us/iteration to only 46\us/iteration.
+
+Unfortunately, the next optimization attempt, which introduces a blocking factor to the primary arrays and used \texttt{upc\_forall}, brought the speeds down and made the UPC implementation much slower than the C implementation.
+
+The addition of $\delta_{max}$, as a way to stop the algorithm once a sufficiently accurate solution is found, inevitably added another overhead to the program.
+With my best efforts, I could only bring its performance to somewhere between those of the first implementation and its first optimization.
+
+Nonetheless, the resulting program runs slightly faster than the original C implementation.
+
+% I'm just making this up really, it depends a lot on the new measurements (which I can't really do because transferring files across 4 open ssh connections is a pain).
+% On my machine I got these results, at least, and they were with 8 threads, which from the tables were the lower bounds where the performance with multi-threading were meaningful
 
 % \lstinputlisting[style=C]{2d_heat/heat_c.c}
 \end{document}
