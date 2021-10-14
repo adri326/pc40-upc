@@ -35,7 +35,7 @@ int main() {
     for (size_t i = 0; i < LEN; i++) mean_squared += (x_new[i] - x[i]) * (x_new[i] - x[i]);
     printf("\nIterations: %d\n", ITERATIONS);
     printf("Mean squared difference: %1.4lf\n", mean_squared / LEN);
-    printf("Took %.2lfms/iter!\n", diff * 1000);
+    printf("Took %.3lfms/iter!\n", diff * 1000);
 }
 
 void init() {
