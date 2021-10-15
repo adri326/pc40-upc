@@ -364,18 +364,17 @@ By removing the calls to \texttt{upc\_forall}, we can reduce the time taken by a
 
 % Unfortunately, no real performance benefit was observed, even with 32 threads.
 
-
-% TODO: redo the measurements
 \begin{table}[ht]
   \centering\begin{tabular}{|c|c|c|c|}
     \hline
     Threads & Time (avg) & CI ($\sigma=0.01$) \\
     \hline
-    2 & 1401.2\us/iter & $\pm$ 5.3\us/iter \\
-    4 & 1106\us/iter & $\pm$ 15.5\us/iter \\
-    8 & 816.8\us/iter & $\pm$ 6.3\us/iter \\
-    16 & 654.6\us/iter & $\pm$ 5.0\us/iter \\
-    32 & 586.2\us/iter & $\pm$ 5.1\us/iter \\
+    2 & 1216.0\us/iter & $\pm$ 27.1\us/iter \\
+    4 & 778.0\us/iter & $\pm$ 15.1\us/iter \\
+    8 & 415.8\us/iter & $\pm$ 10\us/iter \\
+    16 & 225.8\us/iter & $\pm$ 4.8\us/iter \\
+    32 & 130.0\us/iter & $\pm$ 3.1\us/iter \\
+    64 & 98.2\us/iter & $\pm$ 2.7\us/iter \\
     \hline
   \end{tabular}
   \caption{Timing results for the fully optimized UPC implementation of the 1D Laplace solver, $B = 32$, \texttt{MAX\_ITER = 1000}}
@@ -391,7 +390,7 @@ Unfortunately, the next optimization attempt, which introduces a blocking factor
 The addition of $\delta_{max}$, as a way to stop the algorithm once a sufficiently accurate solution is found, inevitably added another overhead to the program.
 With my best efforts, I could only bring its performance to somewhere between those of the first implementation and its first optimization.
 
-Nonetheless, the resulting program runs slightly faster than the original C implementation.
+Nonetheless, the resulting program runs slightly faster than the original C implementation, given enough threads).
 
 % I'm just making this up really, it depends a lot on the new measurements (which I can't really do because transferring files across 4 open ssh connections is a pain).
 % On my machine I got these results, at least, and they were with 8 threads, which from the tables were the lower bounds where the performance with multi-threading were meaningful
