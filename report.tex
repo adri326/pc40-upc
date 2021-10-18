@@ -62,6 +62,7 @@
 \end{abstract}
 
 \section{Simplified 1D Laplace solver}
+\label{sec:laplace}
 
 \subsection{C implementation}
 
@@ -93,7 +94,9 @@ This code has been compiled with \texttt{gcc v4.9.0} and run on the \texttt{meso
 The base C implementation was designed to be able to quickly port it to UPC.
 A new \texttt{if} statement had to be inserted in the \texttt{for} loop within \texttt{iteration()}.
 Additionally, several lines had to only be executed by the thread 0, so additional conditionals were added when needed.
-Finally, the \texttt{x}, \texttt{xnew} and \texttt{b} arrays were made shared and \texttt{upc\_barrier} statements were added at the end of \texttt{init}, \texttt{iteration} and \texttt{copy\_array}.
+
+Finally, the \texttt{x}, \texttt{xnew} and \texttt{b} arrays were made shared and \texttt{upc\_barrier} statements were added at the end of \texttt{init}, \texttt{iteration} and \texttt{copy\_array}:
+this is to prevent threads from beginning processing the next iteration when the \texttt{x} and \texttt{xnew} arrays aren't ready, and to prevent the thread 0 from stopping early and printing the wrong timing.
 
 This code was compiled with \texttt{upcc v2.22.0 + gcc v4.2.4} and run on the \texttt{mesoshared} server, yielding the following results:
 
@@ -296,6 +299,9 @@ Because of the shared nature of $x$ and $x_{new}$, we need to compute a partial 
 
 $$\delta_{max}^t = \max_{i\in \ldbrack 0; n-1 \rdbrack, \; \textrm{\tiny affinity}(x_{new}[i]) = t}{\Bigl\vert x[i]-x_{new}[i] \Bigr\vert}$$
 
+In the implementation, we use one of the collective vector functions provided by UPC.
+This function contains implicit \texttt{upc\_barrier;} instructions, so we do not need to add them ourselves.
+
 The new timings are:
 
 \begin{table}[ht]
@@ -392,8 +398,112 @@ With my best efforts, I could only bring its performance to somewhere between th
 
 Nonetheless, the resulting program runs slightly faster than the original C implementation, given enough threads).
 
-% I'm just making this up really, it depends a lot on the new measurements (which I can't really do because transferring files across 4 open ssh connections is a pain).
-% On my machine I got these results, at least, and they were with 8 threads, which from the tables were the lower bounds where the performance with multi-threading were meaningful
+\section{2D Heat conduction}
 
-% \lstinputlisting[style=C]{2d_heat/heat_c.c}
+For this second algorithm, we will try to improve on the knowledge gathered from the first algorithm and implement a simple, 2D heat conduction simulation.
+As with Section~\ref{sec:laplace}, we begin with a simple C implementation of the algorithm, which will work as our performance base value.
+The provided template came bundled with a performance measurement method, but I swapped it out with \texttt{clock()} in the subsequent UPC implementations for consistency with the last section's code.
+
+\subsection{First C implementation}
+
+Following are the performance results for the first C implementation, ran on \texttt{mesoshared} with \texttt{gcc v4.9.0} and on an \texttt{AMD Ryzen 2700X} with \texttt{clang v12.0.1}:
+
+\begin{table}[h]
+  \centering\begin{tabular}{|c|c|c|}
+    \hline
+    Options & Time (avg) & CI ($\sigma=0.01$) \\
+    \hline
+    \texttt{-O0} & 89.1\us/iter & $\pm$ 0.3\us/iter \\
+    \texttt{-O3} & 15.0\us/iter & $\pm$ 0.1\us/iter \\
+    \hline
+  \end{tabular}
+  \caption{Timing results for \texttt{heat\_c.c} (mesoshared, Listing~\ref{lst:heatc})}
+  \label{tab:heatc}
+\end{table}
+
+\begin{table}[h]
+  \centering\begin{tabular}{|c|c|c|}
+    \hline
+    Options & Time (avg) & CI ($\sigma=0.01$) \\
+    \hline
+    \texttt{-O0} & 80.9\us/iter & $\pm$ 2.6\us/iter \\
+    \texttt{-O3} & 17.9\us/iter & $\pm$ 2.2\us/iter \\
+    \hline
+  \end{tabular}
+  \caption{Timing results for \texttt{heat\_c.c} (Ryzen 2700X, Listing~\ref{lst:heatc})}
+  \label{tab:heatcr}
+\end{table}
+
+\lstinputlisting[style=C, label={lst:heatc}, caption={
+  C implementation of the 2D Heat simulation
+}]{2d_heat/heat_c.c}
+
+\subsection{Porting the C code to UPC}
+
+Porting the template C version to UPC is straightforward.
+The performance, however, takes a hit, as the default work sharing causes a lot of remote accesses to memory, despite the blocking factor that was put in place.
+We obtain the following measurements on \texttt{mesoshared}:
+
+
+
+\begin{table}[ht]
+  \centering\begin{tabular}{|c|c|c|}
+    \hline
+    Threads & Time (avg) & CI ($\sigma=0.01$) \\
+    \hline
+    2 & 259.9\us/iter & $\pm$ 1.9\us/iter \\
+    4 & 193.6\us/iter & $\pm$ 1.5\us/iter \\
+    8 & 164.1\us/iter & $\pm$ 1.2\us/iter \\
+    16 & 150.6\us/iter & $\pm$ 1.4\us/iter \\
+    32 & 151.7\us/iter & $\pm$ 1.7\us/iter \\
+    \hline
+  \end{tabular}
+  \caption{Timing results for \texttt{heat\_1.upc}}
+  \label{tab:heat1}
+\end{table}
+
+\subsection{Optimizing the array accesses}
+
+One simple optimization is to avoid copying the destination array (\texttt{new\_grid}) into the source array (\texttt{grid}).
+
+To do this, we store two shared pointers that will point on either array, and we swap them at the end of each iteration, simulating the a copy of \texttt{grid} into \texttt{new\_grid}, with a $\mathcal{O}(1)$ time complexity instead of $\mathcal{O}(n)$.
+Doing so effectively halves the amount of synchronization that needs to happen for each loop, which can be observed in the timing results:
+
+\begin{table}[ht]
+  \centering\begin{tabular}{|c|c|c|}
+    \hline
+    Threads & Time (avg) & CI ($\sigma=0.01$) \\
+    \hline
+    2 & 134.0\us/iter & $\pm$ 1.4\us/iter \\
+    4 & 103.9\us/iter & $\pm$ 4.1\us/iter \\
+    8 & 87.4\us/iter & $\pm$ 1.0\us/iter \\
+    16 & 81.4\us/iter & $\pm$ 1.2\us/iter \\
+    32 & 82.9\us/iter & $\pm$ 1.5\us/iter \\
+    \hline
+  \end{tabular}
+  \caption{Timing results for \texttt{heat\_3.upc}}
+  \label{tab:heat3}
+\end{table}
+
+\subsection{Array privatization}
+
+As observed in the later examples of the 1D Laplace equation solver (Table~\ref{tab:laplace5}), \texttt{upc\_forall} has a significant performance cost over a regular \texttt{for} loop.
+We also know that local shared memory accesses have a considerable cost when the shared pointer math is done without dedicated hardware support. % cite Olivier Serres here -- too lazy now
+
+\begin{table}[ht]
+  \centering\begin{tabular}{|c|c|c|}
+    \hline
+    Threads & Time (avg) & CI ($\sigma=0.01$) \\
+    \hline
+    2 & 13.5\us/iter & $\pm$ 1.4\us/iter \\
+    4 & 12.6\us/iter & $\pm$ 1.2\us/iter \\
+    8 & 13.3\us/iter & $\pm$ 1.0\us/iter \\
+    16 & 15.0\us/iter & $\pm$ 1.2\us/iter \\
+    32 & 21.5\us/iter & $\pm$ 1.1\us/iter \\
+    \hline
+  \end{tabular}
+  \caption{Timing results for \texttt{heat\_4.upc}}
+  \label{tab:heat4}
+\end{table}
+
 \end{document}

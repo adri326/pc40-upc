@@ -63,6 +63,7 @@ int main(void) {
     time -= ts_start.tv_sec + (ts_start.tv_usec / 1000000.0);
 
     printf("%d iterations in %.3lf sec\n", n_iter, time);
+    printf("Took %.3lf ms/iter\n", time * 1000.0 / n_iter);
 
     return 0;
 }

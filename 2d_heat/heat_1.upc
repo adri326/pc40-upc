@@ -6,7 +6,7 @@
 #include <stdbool.h>
 #include "settings.h"
 
-#define BLOCKSIZE ((N+2) * THREADS)
+#define BLOCKSIZE ((N+2) * (N+2) / THREADS)
 
 shared[BLOCKSIZE] double grid[N+2][N+2];
 shared[BLOCKSIZE] double new_grid[N+2][N+2];
@@ -59,5 +59,6 @@ int main() {
     if (MYTHREAD == 0) {
         double seconds = (double)(end - begin) / CLOCKS_PER_SEC;
         printf("%d iterations in %.3lf sec\n", n_iter, seconds);
+        printf("Took %.3lf ms/iter\n", seconds * 1000.0 / n_iter);
     }
 }
