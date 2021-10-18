@@ -466,7 +466,7 @@ We obtain the following measurements on \texttt{mesoshared}:
 
 One simple optimization is to avoid copying the destination array (\texttt{new\_grid}) into the source array (\texttt{grid}).
 
-To do this, we store two shared pointers that will point on either array, and we swap them at the end of each iteration, simulating the a copy of \texttt{grid} into \texttt{new\_grid}, with a $\mathcal{O}(1)$ time complexity instead of $\mathcal{O}(n)$.
+To do this, we store two shared pointers that will point on either array, and we swap them at the end of each iteration, simulating a copy of \texttt{grid} into \texttt{new\_grid}, with a $\mathcal{O}(1)$ time complexity instead of $\mathcal{O}(n)$.
 Doing so effectively halves the amount of synchronization that needs to happen for each loop, which can be observed in the timing results:
 
 \begin{table}[ht]
