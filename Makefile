@@ -8,7 +8,7 @@ LAPLACE_UPC_OUT=$(LAPLACE_UPC:%=$(BUILD_DIR)/laplace_%)
 HEAT_UPC=heat_1 heat_3 heat_4
 HEAT_UPC_OUT=$(HEAT_UPC:%=$(BUILD_DIR)/%)
 
-build: $(BUILD_DIR)/laplace_ex2 $(BUILD_DIR)/heat_c $(LAPLACE_UPC_OUT) $(HEAT_UPC_OUT)
+build: $(BUILD_DIR)/laplace_ex2 $(BUILD_DIR)/heat_c $(BUILD_DIR)/heat_c_ptr $(LAPLACE_UPC_OUT) $(HEAT_UPC_OUT)
 .PHONY: build
 
 $(BUILD_DIR)/laplace_ex2: laplace/ex2.c laplace/settings.h
@@ -16,6 +16,10 @@ $(BUILD_DIR)/laplace_ex2: laplace/ex2.c laplace/settings.h
 	$(CC) $(CFLAGS) $< -o $@
 
 $(BUILD_DIR)/heat_c: 2d_heat/heat_c.c 2d_heat/settings.h
+	@mkdir -p $(BUILD_DIR)
+	$(CC) $(CFLAGS) $< -o $@ -lm
+
+$(BUILD_DIR)/heat_c_ptr: 2d_heat/heat_c_ptr.c 2d_heat/settings.h
 	@mkdir -p $(BUILD_DIR)
 	$(CC) $(CFLAGS) $< -o $@ -lm
 

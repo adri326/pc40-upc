@@ -4,4 +4,6 @@ build/
 *.out
 *.log
 *.aux
+*.blg
+*.bbl
 exercises/

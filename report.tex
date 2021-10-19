@@ -438,13 +438,13 @@ Following are the performance results for the first C implementation, ran on \te
   C implementation of the 2D Heat simulation
 }]{2d_heat/heat_c.c}
 
+\newpage
+
 \subsection{Porting the C code to UPC}
 
 Porting the template C version to UPC is straightforward.
 The performance, however, takes a hit, as the default work sharing causes a lot of remote accesses to memory, despite the blocking factor that was put in place.
 We obtain the following measurements on \texttt{mesoshared}:
-
-
 
 \begin{table}[ht]
   \centering\begin{tabular}{|c|c|c|}
@@ -462,7 +462,46 @@ We obtain the following measurements on \texttt{mesoshared}:
   \label{tab:heat1}
 \end{table}
 
+\begin{figure}[ht]
+  \begin{subfigure}[b]{0.49\columnwidth}
+    \begin{lstlisting}[style=C, numbers=none]
+// heat_c.c:
+for (i=1; i<N+1; i++) {
+  for (j=1; j<N+1; j++) {
+    T = 0.25 *
+      (grid[i+1][j] + grid[i-1][j] +
+        grid[i][j-1] + grid[i][j+1]); /* stencil */
+    dT = T - grid[i][j]; /* local variation */
+    new_grid[i][j] = T;
+    if (dTmax < fabs(dT)) dTmax = fabs(dT); /* max variation in this iteration */
+  }
+}
+    \end{lstlisting}
+    \caption{Main loop in \texttt{heat\_c.c}}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}[b]{0.49\columnwidth}
+    \begin{lstlisting}[style=C, numbers=none]
+// heat_1.upc:
+for (size_t i = 1; i <= N; i++) {
+  upc_forall (size_t j = 1; j <= N; j++; &grid[i][j]) {
+    double T = 0.25 * (grid[i+1][j] + grid[i-1][j] + grid[i][j-1] + grid[i][j+1]);
+    double dT = fabs(T - grid[i][j]);
+    new_grid[i][j] = T;
+    if (dTmax < dT) dTmax = dT;
+  }
+}
+    \end{lstlisting}
+    \caption{Main loop in \texttt{heat\_1.upc}}
+  \end{subfigure}
+  \caption{Porting the main loop from C to UPC}
+  \label{fig:heatc1}
+\end{figure}
+
+\newpage
+
 \subsection{Optimizing the array accesses}
+\label{sec:ptrswap}
 
 One simple optimization is to avoid copying the destination array (\texttt{new\_grid}) into the source array (\texttt{grid}).
 
@@ -485,10 +524,54 @@ Doing so effectively halves the amount of synchronization that needs to happen f
   \label{tab:heat3}
 \end{table}
 
+This optimization was also done on the C version for comparison, and we obtain the following speeds:
+
+\begin{table}[h]
+  \centering\begin{tabular}{|c|c|c|}
+    \hline
+    Options & Time (avg) & CI ($\sigma=0.01$) \\
+    \hline
+    \texttt{-O0} & 64.0\us/iter & $\pm$ 0.5\us/iter \\
+    \texttt{-O3} & 11.3\us/iter & $\pm$ 0.4\us/iter \\
+    \hline
+  \end{tabular}
+  \caption{Timing results for \texttt{heat\_c\_ptr.c}}
+  \label{tab:heatcptr}
+\end{table}
+
+\begin{lstlisting}[style=C, numbers=none, caption={Excerpt from \texttt{heat\_3.upc}, where pointer-swapping was implemented}, label={lst:heat3}]
+// heat_3.upc:
+shared[BLOCKSIZE] double (*ptr)[N+2] = grid;
+shared[BLOCKSIZE] double (*new_ptr)[N+2] = new_grid;
+
+// ...
+
+if (n_iter % 2 == 0) {
+  ptr = grid;
+  new_ptr = new_grid;
+} else {
+  ptr = new_grid;
+  new_ptr = grid;
+}
+
+// ...
+
+double T = 0.25 * (ptr[i+1][j] + ptr[i-1][j] + ptr[i][j-1] + ptr[i][j+1]);
+double dT = fabs(T - ptr[i][j]);
+new_ptr[i][j] = T;
+\end{lstlisting}
+
 \subsection{Array privatization}
 
 As observed in the later examples of the 1D Laplace equation solver (Table~\ref{tab:laplace5}), \texttt{upc\_forall} has a significant performance cost over a regular \texttt{for} loop.
-We also know that local shared memory accesses have a considerable cost when the shared pointer math is done without dedicated hardware support. % cite Olivier Serres here -- too lazy now
+We also know that local shared memory accesses have a considerable cost when the shared pointer math is done without dedicated hardware support \cite{OlivierSerres:2015}.
+
+To make use of less shared accesses, we can copy a chunk of the $grid$ array into private memory using \texttt{upc\_memget} (into \texttt{ptr\_priv} and \texttt{new\_ptr\_priv}).
+We specifically only retrieve the memory that has the affinity to the current thread, so that we can write to it and broadcast it in one go.
+The memory is copied also duplicated to make use of pointer-swapping as in Section~\ref{sec:ptrswap}.
+
+We then operate on the private array, only using remote accesses when necessary, and store the results in the new private array.
+Once the work is finished, we put the new private array into \texttt{new\_grid} with \texttt{upc\_memput} and synchronize $\delta_{max}$.
 
 \begin{table}[ht]
   \centering\begin{tabular}{|c|c|c|}
@@ -502,8 +585,17 @@ We also know that local shared memory accesses have a considerable cost when the
     32 & 21.5\us/iter & $\pm$ 1.1\us/iter \\
     \hline
   \end{tabular}
-  \caption{Timing results for \texttt{heat\_4.upc}}
+  \caption{Timing results for \texttt{heat\_4.upc} (Listing~\ref{lst:heat4})}
   \label{tab:heat4}
 \end{table}
+
+\lstinputlisting[style=C, label={lst:heat4}, caption={
+  Optimized UPC implementation of the 2D Heat algorithm (\texttt{heat\_4.upc})
+}]{2d_heat/heat_4.upc}
+
+\newpage
+\addcontentsline{toc}{section}{References}
+\bibliographystyle{plain}
+\bibliography{report}
 
 \end{document}
