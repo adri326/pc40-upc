@@ -9,7 +9,8 @@
 \usepackage{listings}
 \usepackage{xcolor}
 \usepackage{subcaption}
-
+\usepackage{multirow}
+\usepackage{makecell}
 
 \usepackage{hyperref}
 \hypersetup{
@@ -60,6 +61,10 @@
 
   The source code itself, this report's source code and instructions on how to build and run the code yourself can be found on this project's git repository: \url{https://github.com/adri326/pc40-upc/}.
 \end{abstract}
+
+\newpage
+\tableofcontents
+\newpage
 
 \section{Simplified 1D Laplace solver}
 \label{sec:laplace}
@@ -203,6 +208,7 @@ void iteration() {
 % }]{laplace/ex4.upc}
 
 \subsection{Optimizing the array blocking factor}
+\label{sec:laplace5}
 
 Our next optimization is to increase the blocking factor $B$ for the $x$, $x_{new}$ and $b$ arrays.
 Each operation on the item of index $j$ accesses $b[j]$, $x[j-1]$, $x[j+1]$ and $x_{new}[j]$.
@@ -298,9 +304,6 @@ One of our last modifications is to measure $\delta_{max} = \max_{i\in \ldbrack 
 Because of the shared nature of $x$ and $x_{new}$, we need to compute a partial $\delta_{max}^t$ and compute $\delta_{max} = \max_{t \in [0; T[}(\delta_{max}^t)$, with:
 
 $$\delta_{max}^t = \max_{i\in \ldbrack 0; n-1 \rdbrack, \; \textrm{\tiny affinity}(x_{new}[i]) = t}{\Bigl\vert x[i]-x_{new}[i] \Bigr\vert}$$
-
-In the implementation, we use one of the collective vector functions provided by UPC.
-This function contains implicit \texttt{upc\_barrier;} instructions, so we do not need to add them ourselves.
 
 The new timings are:
 
@@ -399,6 +402,7 @@ With my best efforts, I could only bring its performance to somewhere between th
 Nonetheless, the resulting program runs slightly faster than the original C implementation, given enough threads).
 
 \section{2D Heat conduction}
+\label{sec:heat}
 
 For this second algorithm, we will try to improve on the knowledge gathered from the first algorithm and implement a simple, 2D heat conduction simulation.
 As with Section~\ref{sec:laplace}, we begin with a simple C implementation of the algorithm, which will work as our performance base value.
@@ -562,6 +566,7 @@ new_ptr[i][j] = T;
 \end{lstlisting}
 
 \subsection{Array privatization}
+\label{sec:heat4}
 
 As observed in the later examples of the 1D Laplace equation solver (Table~\ref{tab:laplace5}), \texttt{upc\_forall} has a significant performance cost over a regular \texttt{for} loop.
 We also know that local shared memory accesses have a considerable cost when the shared pointer math is done without dedicated hardware support \cite{OlivierSerres:2015}.
@@ -592,6 +597,191 @@ Once the work is finished, we put the new private array into \texttt{new\_grid} 
 \lstinputlisting[style=C, label={lst:heat4}, caption={
   Optimized UPC implementation of the 2D Heat algorithm (\texttt{heat\_4.upc})
 }]{2d_heat/heat_4.upc}
+
+\subsection{Dynamic problem size}
+
+This last version of our code is not an optimization: we adapt it so that we can specify the number of threads and the size of the grid at runtime, rather than at compile time.
+This requires changing a big portion of the code, as it was previously using pre-defined constants for these two parameters.
+
+Because speed for this part is not a worry, we based the code from \texttt{heat\_3.upc}, as the previous optimization step made the code harder to work with.
+
+The declaration of \texttt{grid} and \texttt{new\_grid} have been deleted and are done implicitely through the compiler-supplied function \texttt{upc\_all\_alloc}.
+The matrix notation, while useful, had to be gotten rid of, as it was dependent on $N$, which is now dynamic.
+This meant re-writing all of the matrix accesses to now multiply the $y$ coordinate by $(n+2)$ and to add its result to the $x$ coordinate.
+
+\lstinputlisting[style=C, label={lst:heat5}, caption={
+  Dynamic UPC implementation of the 2D Heat algorithm (\texttt{heat\_5.upc})
+}]{2d_heat/heat_5.upc}
+
+\section{Conclusion}
+
+For both the Simplified 1D Laplace Equation Solver (Section~\ref{sec:laplace}) and the 2D Heat Algorithm (Section~\ref{sec:heat}), we were able to take a simple C implementation and port it to UPC with minimal effort.
+These two problems are easily parallelizable, as all of the work within an iteration can be done independently (or vertically).
+
+We then went along the process of refining the UPC implementation and optimizing the various accesses to the arrays to reduce the overhead of parallelization induced by UPC.
+Unfortunately, the overhead encountered here is mainly caused by the shared pointer operations (as highlighted by the results in Section~\ref{sec:laplace5} and Section~\ref{sec:heat4}).
+Minimizing this overhead required heavy modification to the code.
+
+With all of our efforts, the UPC implementation only came shortly before the C implementation when benchmarked and required at least 8 threads to overcome the language's overhead.
+This difficulty to beat the speed of C is explained by the nature of the problems at hand: each iteration consists of a small amount of work over a large set of data, that needs to be synchronized before the next iteration.
+Even with a perfect parallelization of the algorithm (with no synchronization overhead), we would still be bottlenecked by the data transfer speeds and the slowest thread contributing to the calculation.
+
+\subsection{Speed comparison}
+
+Following are two comparative tables of all of the measurements of this report.
+
+The Simplified 1D Laplace Equation Solver scored great until we introduced $\delta_{max}$, which required some costly synchronization.
+
+The 2D Heat Algorithm did worse, only achieving speeds close to those of C.
+The synchronization costs made it unfeasible to use a greater amount of threads, as can be seen with the last few rows.
+
+\begin{table}[!htp]
+  \centering\begin{tabular}{|c|l|r|l|}
+    \hline
+    Implementation & Options & Time (avg) & CI ($\sigma=0.01$) \\
+    \hline \hline
+    \multirow{2}{*}{\hyperref[tab:laplace2]{\texttt{laplace/ex2.c}}}
+    & \texttt{-O0} & 450\us/iter & $\pm$ 10\us/iter \\
+    & \texttt{-O3} & 140\us/iter & $\pm$ 10\us/iter \\
+    \hline
+    \multirow{5}{*}{\makecell{
+      \hyperref[tab:laplace3]{\texttt{laplace/ex3.upc}} \\
+      (w/o $\delta_{max}$)
+    }}
+    & $T=2$ & 515.2\us/iter & $\pm$ 3.9\us/iter \\
+    & $T=4$ & 312.4\us/iter & $\pm$ 2.0\us/iter \\
+    & $T=8$ & 204.0\us/iter & $\pm$ 2.0\us/iter \\
+    & $T=16$ & 166.2\us/iter & $\pm$ 2.5\us/iter \\
+    & $T=32$ & 150.4\us/iter & $\pm$ 3.2\us/iter \\
+    \hline
+    \multirow{5}{*}{\makecell{
+      \hyperref[tab:laplace4]{\texttt{laplace/ex4.upc}} \\
+      (w/o $\delta_{max}$)
+    }}
+    & $T=2$ & 482.0\us/iter & $\pm$ 3.2\us/iter \\
+    & $T=4$ & 265.2\us/iter & $\pm$ 2.3\us/iter \\
+    & $T=8$ & 128.8\us/iter & $\pm$ 1.6\us/iter \\
+    & $T=16$ & 74.6\us/iter & $\pm$ 3.1\us/iter \\
+    & $T=32$ & 46.0\us/iter & $\pm$ 2.5\us/iter \\
+    \hline
+    \multirow{5}{*}{\makecell{
+      \hyperref[tab:laplace5]{\texttt{laplace/ex5.upc}} \\
+      (with $\delta_{max}$)
+    }}
+    & $T=2$ & 959.2\us/iter & $\pm$ 3.9\us/iter \\
+    & $T=4$ & 863.9\us/iter & $\pm$ 16.1\us/iter \\
+    & $T=8$ & 691.6\us/iter & $\pm$ 6.1\us/iter \\
+    & $T=16$ & 581.5\us/iter & $\pm$ 4.1\us/iter \\
+    & $T=32$ & 536.9\us/iter & $\pm$ 4.0\us/iter \\
+    \hline
+    \multirow{5}{*}{\makecell{
+      \hyperref[tab:laplace6]{\texttt{laplace/ex6.upc}} \\
+      (with $\delta_{max}$)
+    }}
+    & $T=2$ & 1400.4\us/iter & $\pm$ 6.0\us/iter \\
+    & $T=4$ & 1092.8\us/iter & $\pm$ 17.0\us/iter \\
+    & $T=8$ & 803.4\us/iter & $\pm$ 7.7\us/iter \\
+    & $T=16$ & 647.8\us/iter & $\pm$ 18.9\us/iter \\
+    & $T=32$ & 572.0\us/iter & $\pm$ 4.6\us/iter \\
+    \hline
+    \multirow{5}{*}{\makecell{
+      \hyperref[tab:laplace6opt]{\texttt{laplace/optimized.upc}} \\
+      (with $\delta_{max}$)
+    }}
+    & $T=2$ & 1216.0\us/iter & $\pm$ 27.1\us/iter \\
+    & $T=4$ & 778.0\us/iter & $\pm$ 15.1\us/iter \\
+    & $T=8$ & 415.8\us/iter & $\pm$ 10\us/iter \\
+    & $T=16$ & 225.8\us/iter & $\pm$ 4.8\us/iter \\
+    & $T=32$ & 130.0\us/iter & $\pm$ 3.1\us/iter \\
+    & $T=64$ & 98.2\us/iter & $\pm$ 2.7\us/iter \\
+    \hline
+  \end{tabular}
+  \caption{Comparative table of the benchmarks of the Simplified Laplace 1D Solver}
+  \label{tab:laplace}
+\end{table}
+
+\begin{table}[!htp]
+  \centering\begin{tabular}{|c|l|r|l|}
+    \hline
+    Implementation & Options & Time (avg) & CI ($\sigma=0.01$) \\
+    \hline \hline
+    \multirow{2}{*}{\makecell{
+      \hyperref[tab:heatc]{\texttt{heat\_c.c}} \\
+      (w/o ptr-swap)
+    }}
+    & \texttt{-O0} & 80.9\us/iter & $\pm$ 2.6\us/iter \\
+    & \texttt{-O3} & 17.9\us/iter & $\pm$ 2.2\us/iter \\
+    \hline
+    \multirow{2}{*}{\makecell{
+      \hyperref[tab:heatcptr]{\texttt{heat\_c\_ptr.c}} \\
+      (with ptr-swap)
+    }}
+    & \texttt{-O0} & 64.0\us/iter & $\pm$ 0.5\us/iter \\
+    & \texttt{-O3} & 11.3\us/iter & $\pm$ 0.4\us/iter \\
+    \hline
+    \multirow{5}{*}{\makecell{
+      \hyperref[tab:heat1]{\texttt{heat\_1.upc}} \\
+      (w/o ptr-swap)
+    }}
+    & $T=2$ & 259.9\us/iter & $\pm$ 1.9\us/iter \\
+    & $T=4$ & 193.6\us/iter & $\pm$ 1.5\us/iter \\
+    & $T=8$ & 164.1\us/iter & $\pm$ 1.2\us/iter \\
+    & $T=16$ & 150.6\us/iter & $\pm$ 1.4\us/iter \\
+    & $T=32$ & 151.7\us/iter & $\pm$ 1.7\us/iter \\
+    \hline
+    \multirow{5}{*}{\makecell{
+      \hyperref[tab:heat3]{\texttt{heat\_3.upc}} \\
+      (with ptr-swap)
+    }}
+    & $T=2$ & 134.0\us/iter & $\pm$ 1.4\us/iter \\
+    & $T=4$ & 103.9\us/iter & $\pm$ 4.1\us/iter \\
+    & $T=8$ & 87.4\us/iter & $\pm$ 1.0\us/iter \\
+    & $T=16$ & 81.4\us/iter & $\pm$ 1.2\us/iter \\
+    & $T=32$ & 82.9\us/iter & $\pm$ 1.5\us/iter \\
+    \hline
+    \multirow{5}{*}{\makecell{
+      \hyperref[tab:heat4]{\texttt{heat\_4.upc}} \\
+      (with ptr-swap)
+    }}
+    & $T=2$ & 13.5\us/iter & $\pm$ 1.4\us/iter \\
+    & $T=4$ & 12.6\us/iter & $\pm$ 1.2\us/iter \\
+    & $T=8$ & 13.3\us/iter & $\pm$ 1.0\us/iter \\
+    & $T=16$ & 15.0\us/iter & $\pm$ 1.2\us/iter \\
+    & $T=32$ & 21.5\us/iter & $\pm$ 1.1\us/iter \\
+    \hline
+  \end{tabular}
+  \caption{Comparative table of the benchmarks of the 2D Heat Algorithm}
+  \label{tab:heat}
+\end{table}
+
+\subsection{Personal remarks}
+
+Overall, I enjoyed working with UPC and optimizing the parallelized code.
+However, I feel like UPC is lacking behind in terms of what the compiler can optimize for the developer.
+For instance, it could unwrap a \texttt{upc\_forall} loop into two \texttt{for} loops when the increment is a divisor of the blocking factor: this can easily be done with macros already and can only make the code faster.
+
+The hardest part of working on this project was finding documentation for the language itself.
+The documentation is scattered across internet, with some tutorials explaining how basic functions work but missing the more complicated functions, some documentation hosted on code mirroring websites and the rest burried inside of the compiler's source code.
+
+Searching for example \textit{"upc\_all\_reduceD"} online brings up \href{https://upc.lbl.gov/hypermail/upc-users/0550.html}{an 11-year old mail archive}, \href{https://github.com/ROCm-Developer-Tools/OSU_Microbenchmarks/blob/master/upc/osu_upc_all_broadcast.c}{a benchmark of UPC} and quite further down the summary of the UPC Collective specification.
+The only way to truly know what this function does is to \href{https://fossies.org/linux/berkeley_upc/upc-tests/UPC-Coll-RefImp/upc_all_reduce.c}{read its source code}.
+
+This contrasts with other, smaller languages that I have encountered until now, whose documentation is usually centered in one place.
+With the similarly niche language "Pony", searching \textit{"ponylang hashmap"} online yields \href{https://stdlib.ponylang.io/collections-HashMap/}{a rendered version of the documentation of the language's standard library} as the first result.
+
+The errors outputted by the language were also of little help, as they did not show any additional information. The \texttt{--verbose} flag only displayed information unrelated to the error.
+
+\begin{figure}
+  \begin{lstlisting}[style=C]
+$ upcc 2d_heat/heat_5.upc -o build/heat_5
+upcc: error during UPC-to-C translation (sgiupc stage):
+2d_heat/heat_5.upc: In function 'main':
+2d_heat/heat_5.upc:66: incompatible type for argument 1 of 'bupc_all_reduceD'
+  \end{lstlisting}
+  \caption{\textit{"I guess the compiler wants me to learn the function signature by myself."}}
+\end{figure}
+
+Nonetheless, I am glad that I got to try out this language and work with parallelized code.
 
 \newpage
 \addcontentsline{toc}{section}{References}

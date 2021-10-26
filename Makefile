@@ -8,7 +8,7 @@ LAPLACE_UPC_OUT=$(LAPLACE_UPC:%=$(BUILD_DIR)/laplace_%)
 HEAT_UPC=heat_1 heat_3 heat_4
 HEAT_UPC_OUT=$(HEAT_UPC:%=$(BUILD_DIR)/%)
 
-build: $(BUILD_DIR)/laplace_ex2 $(BUILD_DIR)/heat_c $(BUILD_DIR)/heat_c_ptr $(LAPLACE_UPC_OUT) $(HEAT_UPC_OUT)
+build: $(BUILD_DIR)/laplace_ex2 $(BUILD_DIR)/heat_c $(BUILD_DIR)/heat_c_ptr $(LAPLACE_UPC_OUT) $(HEAT_UPC_OUT) $(BUILD_DIR)/heat_5
 .PHONY: build
 
 $(BUILD_DIR)/laplace_ex2: laplace/ex2.c laplace/settings.h
@@ -31,6 +31,9 @@ $(HEAT_UPC_OUT): $(BUILD_DIR)/%: 2d_heat/%.upc 2d_heat/settings.h
 	@mkdir -p $(BUILD_DIR)
 	$(UPCC) -T $(THREADS) $< -o $@
 
+$(BUILD_DIR)/heat_5: 2d_heat/heat_5.upc 2d_heat/settings.h
+	@mkdir -p $(BUILD_DIR)
+	$(UPCC) $< -o $@
 # $(BUILD_DIR)/laplace_ex3: laplace/ex3.upc settings.h
 # 	@mkdir -p $(BUILD_DIR)
 # 	$(UPCC) -T $(THREADS) laplace/ex3.upc -o $(BUILD_DIR)/laplace_ex3
