@@ -135,7 +135,7 @@ When compiled and run with 3 threads, the code runs noticeably slower. For curio
 
 \subsection{Optimizing the inner for loop}
 
-The first step in optimizing our UPC implementation of the 1D Laplace equation solver is to replace the \texttt{for (...) if (...)} with a single, more efficient \texttt{for} loop.
+The first step in optimizing the UPC implementation of the 1D Laplace equation solver is to replace the \texttt{for (...) if (...)} with a single, more efficient \texttt{for} loop.
 
 To achieve this, only the \texttt{iteration()} function had to be changed.
 This transformation is shown in Figure~\ref{fig:laplace34}
@@ -299,7 +299,7 @@ void copy_array() {
 
 \subsection{Detecting convergence}
 
-One of our last modifications is to measure $\delta_{max} = \max_{i\in \ldbrack 0; n-1 \rdbrack}{\bigl\vert x[i]-x_{new}[i] \bigr\vert}$ (named \texttt{diffmax} in the source code) and to stop once $\delta_{max} \leq \varepsilon$.
+One of my last modifications is to measure $\delta_{max} = \max_{i\in \ldbrack 0; n-1 \rdbrack}{\bigl\vert x[i]-x_{new}[i] \bigr\vert}$ (named \texttt{diffmax} in the source code) and to stop once $\delta_{max} \leq \varepsilon$.
 
 Because of the shared nature of $x$ and $x_{new}$, we need to compute a partial $\delta_{max}^t$ and compute $\delta_{max} = \max_{t \in [0; T[}(\delta_{max}^t)$, with:
 
@@ -369,7 +369,7 @@ void iteration() {
 We can further optimize this code by using reduction operations from \texttt{upc\_collective.h}.
 The optimized variant is available at \texttt{\href{https://github.com/adri326/pc40-upc/tree/main/laplace/ex5.upc}{laplace/optimized.upc}}.
 
-By removing the calls to \texttt{upc\_forall}, we can reduce the time taken by a further $35\% (\pm 5\%pt)$.
+By removing the calls to \texttt{upc\_forall}, I could reduce the time taken by a further $35\% (\pm 5\%pt)$.
 
 % Unfortunately, no real performance benefit was observed, even with 32 threads.
 
@@ -404,8 +404,8 @@ Nonetheless, the resulting program runs slightly faster than the original C impl
 \section{2D Heat conduction}
 \label{sec:heat}
 
-For this second algorithm, we will try to improve on the knowledge gathered from the first algorithm and implement a simple, 2D heat conduction simulation.
-As with Section~\ref{sec:laplace}, we begin with a simple C implementation of the algorithm, which will work as our performance base value.
+For this second algorithm, I will try to improve on the knowledge gathered from the first algorithm and implement a simple, 2D heat conduction simulation.
+As with Section~\ref{sec:laplace}, I begin with a simple C implementation of the algorithm, which will work as my performance base value.
 The provided template came bundled with a performance measurement method, but I swapped it out with \texttt{clock()} in the subsequent UPC implementations for consistency with the last section's code.
 
 \subsection{First C implementation}
@@ -509,7 +509,7 @@ for (size_t i = 1; i <= N; i++) {
 
 One simple optimization is to avoid copying the destination array (\texttt{new\_grid}) into the source array (\texttt{grid}).
 
-To do this, we store two shared pointers that will point on either array, and we swap them at the end of each iteration, simulating a copy of \texttt{grid} into \texttt{new\_grid}, with a $\mathcal{O}(1)$ time complexity instead of $\mathcal{O}(n)$.
+To do this, I store two shared pointers that will point on either array, and I swap them at the end of each iteration, simulating a copy of \texttt{grid} into \texttt{new\_grid}, with a $\mathcal{O}(1)$ time complexity instead of $\mathcal{O}(n)$.
 Doing so effectively halves the amount of synchronization that needs to happen for each loop, which can be observed in the timing results:
 
 \begin{table}[ht]
@@ -528,7 +528,7 @@ Doing so effectively halves the amount of synchronization that needs to happen f
   \label{tab:heat3}
 \end{table}
 
-This optimization was also done on the C version for comparison, and we obtain the following speeds:
+This optimization was also done on the C version for comparison, and I obtain the following speeds:
 
 \begin{table}[h]
   \centering\begin{tabular}{|c|c|c|}
@@ -571,12 +571,12 @@ new_ptr[i][j] = T;
 As observed in the later examples of the 1D Laplace equation solver (Table~\ref{tab:laplace5}), \texttt{upc\_forall} has a significant performance cost over a regular \texttt{for} loop.
 We also know that local shared memory accesses have a considerable cost when the shared pointer math is done without dedicated hardware support \cite{OlivierSerres:2015}.
 
-To make use of less shared accesses, we can copy a chunk of the $grid$ array into private memory using \texttt{upc\_memget} (into \texttt{ptr\_priv} and \texttt{new\_ptr\_priv}).
-We specifically only retrieve the memory that has the affinity to the current thread, so that we can write to it and broadcast it in one go.
+To make use of less shared accesses, the program can copy a chunk of the $grid$ array into private memory using \texttt{upc\_memget} (into \texttt{ptr\_priv} and \texttt{new\_ptr\_priv}).
+We specifically only retrieve the memory that has the affinity to the current thread, so that the code can write to it and broadcast it in one go.
 The memory is copied also duplicated to make use of pointer-swapping as in Section~\ref{sec:ptrswap}.
 
 We then operate on the private array, only using remote accesses when necessary, and store the results in the new private array.
-Once the work is finished, we put the new private array into \texttt{new\_grid} with \texttt{upc\_memput} and synchronize $\delta_{max}$.
+Once the work is finished, the program put the new private array into \texttt{new\_grid} with \texttt{upc\_memput} and synchronize $\delta_{max}$.
 
 \begin{table}[ht]
   \centering\begin{tabular}{|c|c|c|}
@@ -600,10 +600,10 @@ Once the work is finished, we put the new private array into \texttt{new\_grid} 
 
 \subsection{Dynamic problem size}
 
-This last version of our code is not an optimization: we adapt it so that we can specify the number of threads and the size of the grid at runtime, rather than at compile time.
+This last version of the code is not an optimization: we had to adapt it so that we could specify the number of threads and the size of the grid at runtime, rather than at compile time.
 This requires changing a big portion of the code, as it was previously using pre-defined constants for these two parameters.
 
-Because speed for this part is not a worry, we based the code from \texttt{heat\_3.upc}, as the previous optimization step made the code harder to work with.
+Because speed for this part is not a worry, I based the code from \texttt{heat\_3.upc}, as the previous optimization step made the code harder to work with.
 
 The declaration of \texttt{grid} and \texttt{new\_grid} have been deleted and are done implicitely through the compiler-supplied function \texttt{upc\_all\_alloc}.
 The matrix notation, while useful, had to be gotten rid of, as it was dependent on $N$, which is now dynamic.
@@ -615,22 +615,22 @@ This meant re-writing all of the matrix accesses to now multiply the $y$ coordin
 
 \section{Conclusion}
 
-For both the Simplified 1D Laplace Equation Solver (Section~\ref{sec:laplace}) and the 2D Heat Algorithm (Section~\ref{sec:heat}), we were able to take a simple C implementation and port it to UPC with minimal effort.
+For both the Simplified 1D Laplace Equation Solver (Section~\ref{sec:laplace}) and the 2D Heat Algorithm (Section~\ref{sec:heat}), I was able to take a simple C implementation and port it to UPC with minimal effort.
 These two problems are easily parallelizable, as all of the work within an iteration can be done independently (or vertically).
 
 We then went along the process of refining the UPC implementation and optimizing the various accesses to the arrays to reduce the overhead of parallelization induced by UPC.
 Unfortunately, the overhead encountered here is mainly caused by the shared pointer operations (as highlighted by the results in Section~\ref{sec:laplace5} and Section~\ref{sec:heat4}).
 Minimizing this overhead required heavy modification to the code.
 
-With all of our efforts, the UPC implementation only came shortly before the C implementation when benchmarked and required at least 8 threads to overcome the language's overhead.
+With all of my efforts, the UPC implementation only came shortly before the C implementation when benchmarked and required at least 8 threads to overcome the language's overhead.
 This difficulty to beat the speed of C is explained by the nature of the problems at hand: each iteration consists of a small amount of work over a large set of data, that needs to be synchronized before the next iteration.
-Even with a perfect parallelization of the algorithm (with no synchronization overhead), we would still be bottlenecked by the data transfer speeds and the slowest thread contributing to the calculation.
+Even with a perfect parallelization of the algorithm (with no synchronization overhead), the implementation would still be bottlenecked by the data transfer speeds and the slowest thread contributing to the calculation.
 
 \subsection{Speed comparison}
 
 Following are two comparative tables of all of the measurements of this report.
 
-The Simplified 1D Laplace Equation Solver scored great until we introduced $\delta_{max}$, which required some costly synchronization.
+The Simplified 1D Laplace Equation Solver scored great until I introduced $\delta_{max}$, which required some costly synchronization.
 
 The 2D Heat Algorithm did worse, only achieving speeds close to those of C.
 The synchronization costs made it unfeasible to use a greater amount of threads, as can be seen with the last few rows.
